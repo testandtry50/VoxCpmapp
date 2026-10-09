@@ -1,4 +1,4 @@
-name: Build APK
+name: Build APK from ZIP
 
 on:
   push:
@@ -36,10 +36,19 @@ jobs:
 
       - name: Generate Android project and add our code
         run: |
+          # If the project is only present as a .zip, extract it first
+          find_app() { find . -type d -path '*/app/lib' -not -path './out/*' -not -path './_src/node_modules/*' | head -1; }
+          if [ -z "$(find_app)" ]; then
+            ZIP=$(find . -maxdepth 2 -name '*.zip' | head -1)
+            echo "Extracting $ZIP"
+            unzip -q -o "$ZIP" -d _src
+          fi
+          APP=$(dirname "$(find_app)")
+          echo "Using app dir: $APP"
           flutter create --platforms=android --org com.voxcpm --project-name voxcpm_mobile out
           rm -rf out/lib out/test
-          cp -r app/lib out/lib
-          cp app/pubspec.yaml out/pubspec.yaml
+          cp -r "$APP/lib" out/lib
+          cp "$APP/pubspec.yaml" out/pubspec.yaml
           M=out/android/app/src/main/AndroidManifest.xml
           sed -i 's|<application|<uses-permission android:name="android.permission.INTERNET"/>\n    <application android:usesCleartextTraffic="true"|' $M
           sed -i 's|android:label="voxcpm_mobile"|android:label="VoxCPM"|' $M
