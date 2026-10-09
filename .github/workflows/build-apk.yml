@@ -1,0 +1,69 @@
+name: Build APK from ZIP
+
+on:
+  push:
+    paths: ["*.zip"]      # runs whenever a .zip is uploaded to the repo root
+  workflow_dispatch:      # or press "Run workflow" manually
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Unzip the uploaded ZIP and find the app
+        run: |
+          mkdir -p src
+          for z in *.zip; do
+            [ -e "$z" ] || continue
+            echo "Unzipping $z"
+            unzip -q -o "$z" -d src
+          done
+          PUB=$(find . -name pubspec.yaml -not -path './.git/*' | head -n1)
+          if [ -z "$PUB" ]; then
+            echo "::error::No Flutter app found. Upload voxcpm-mobile.zip to the repo root."
+            exit 1
+          fi
+          echo "APP_DIR=$(dirname "$PUB")" >> "$GITHUB_ENV"
+          echo "Found app in $(dirname "$PUB")"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Generate Android project and add our code
+        run: |
+          flutter create --platforms=android --org com.voxcpm --project-name voxcpm_mobile out
+          rm -rf out/lib out/test
+          cp -r "$APP_DIR/lib" out/lib
+          cp "$APP_DIR/pubspec.yaml" out/pubspec.yaml
+          M=out/android/app/src/main/AndroidManifest.xml
+          sed -i 's|<application|<uses-permission android:name="android.permission.INTERNET"/>\n    <application android:usesCleartextTraffic="true"|' $M
+          sed -i 's|android:label="voxcpm_mobile"|android:label="VoxCPM"|' $M
+
+      - name: Build release APK
+        working-directory: out
+        run: |
+          flutter build apk --release
+          cp build/app/outputs/flutter-apk/app-release.apk ../VoxCPM.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: voxcpm-apk
+          path: VoxCPM.apk
+
+      - name: Publish APK as a Release (direct download link)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-${{ github.run_number }}
+          name: VoxCPM APK #${{ github.run_number }}
+          files: VoxCPM.apk
